@@ -1,9 +1,11 @@
 Model training:
-  - ...
-  - ...
+  - training.py
 
-Apply models to videos:
-  - ...
-  - ...
+Apply networks:
+  - ... (presorting module to videos)
+  - ... (Identification network to videos -> ID's)
+  - ... (Identification network and presorting module -> ID's)
 
-Visualzation in the bachelor thesis (....).
+Other
+  - plotting.py (visualzation for the thesis)
+  - label_tool.py (annotation program)

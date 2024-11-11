@@ -7,5 +7,6 @@ Apply networks:
   - ... (Identification network and presorting module -> ID's)
 
 Other
-  - plotting.py (visualzation for the thesis)
-  - label_tool.py (annotation program)
+  - "plotting.py" - (visualzation for the thesis)
+  - "label_tool.py" - (annotation program)
+

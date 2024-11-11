@@ -1,12 +1,12 @@
 Model training:
-  - training.py
+  - train_presorting_module.py
+  - train_ID.py
 
 Apply networks:
-  - ... (presorting module to videos)
-  - ... (Identification network to videos -> ID's)
-  - ... (Identification network and presorting module -> ID's)
+  - apply_presorting_module.py
+  - apply_both_modules.py                           
 
-Other
-  - "plotting.py" - (visualzation for the thesis)
-  - "label_tool.py" - (annotation program)
-
+Other:
+  - plotting.py                                   
+  - label_tool_from_scratch.py                    
+  - label_tool_on_sorting_model_predictions.py   

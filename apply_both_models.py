@@ -35,20 +35,27 @@ class GeorgDataset(Dataset):
 
         return img, label
 
-data_path = "../data/all_data_learning/"
-sorting_model_path = "save/quality_model_binary.pth"
-ident_model_path = "upload/first_round/99_label_all_data_2k_0.pth"
-write_path = "../data/second_try/99_model_labeled_data/99_all_data_with_sort/"
-threshhold = 0.9
+# path
+data_path = "other/videos/"
+sorting_model_path = "other/models/binary_model.pth"
+ident_model_path = "other/models/best1.pth"
+write_path = "other/save_pseudo/"
 
-device = "cuda:0"
+# Threshholds for id and presorting module
+threshhold_id = 0.9
+threshhold_sort = 0
+
+# flag to only apply to id module
+only_apply_ID = False
+
+device = "cpu"
 num_models = 1
 batch_size = 10
 classes = 8
 
 sm = nn.Softmax(dim=1)
 
-# load resnet
+# load ID module
 ident_model = torchvision.models.resnet18(pretrained=True)
 num_ftrs = ident_model.fc.in_features
 ident_model.fc = nn.Linear(num_ftrs, 8)
@@ -61,7 +68,7 @@ ident_model.load_state_dict(adapted_dict)
 ident_model.to(device)
 ident_model.eval()
 
-# load resnet
+# load presorting module
 sorting_model = get_model("resnet18", weights="IMAGENET1K_V1")    
 last_layer = nn.Sequential(
     nn.Linear(sorting_model.fc.in_features, 2),
@@ -76,8 +83,6 @@ files = os.listdir(data_path)
 files = list(set(files))
 files = set([x[:-4] for x in files])
 labels = []
-
-print(files)
 
 for file in files:
     with open(data_path+file+".txt", "r") as f:
@@ -141,27 +146,32 @@ for file in files:
                 ident = torch.argmax(pred).item()
                 value = pred[0][ident].item()
             
-            if torch.argmax(pred).item() != 7 and value > threshhold:
-                frame = orig.copy()
-
-                frame = orig.copy()
-                frame = frame[:, :, ::-1].transpose(2, 0, 1)
-                frame = np.ascontiguousarray(frame, dtype=np.float32)
-                frame /= 255.0
-
-                frame = torch.from_numpy(frame)
-                frame = frame.to(device).unsqueeze(dim=0)       
-
-                with torch.no_grad():
-                    pred_2 = sorting_model(frame)
-                    ident_2 = torch.argmax(pred_2).item()
-                    value = pred_2[0][ident_2].item()
-                
-                if torch.argmax(pred_2).item() == 1:
+            if torch.argmax(pred).item() != 7 and value > threshhold_id:
+                if only_apply_ID:
                     frame = orig.copy()
-                    
                     cv2.imwrite(write_path+"images/"+file+"_"+str(fd[0])+"_"+str(fd[1])+"_"+str(ident)+".jpg",frame)
                     labels.append([file,str(fd[0]),str(fd[1]), ident])
+                else:
+                    frame = orig.copy()
+
+                    frame = orig.copy()
+                    frame = frame[:, :, ::-1].transpose(2, 0, 1)
+                    frame = np.ascontiguousarray(frame, dtype=np.float32)
+                    frame /= 255.0
+
+                    frame = torch.from_numpy(frame)
+                    frame = frame.to(device).unsqueeze(dim=0)       
+
+                    with torch.no_grad():
+                        pred_2 = sorting_model(frame)
+                        ident_2 = torch.argmax(pred_2).item()
+                        value = pred_2[0][ident_2].item()
+                    
+                    if torch.argmax(pred_2).item() == 1 and value > threshhold_sort:
+                        frame = orig.copy()
+                        
+                        cv2.imwrite(write_path+"images/"+file+"_"+str(fd[0])+"_"+str(fd[1])+"_"+str(ident)+".jpg",frame)
+                        labels.append([file,str(fd[0]),str(fd[1]), ident])
             
             pos_lines += 1
             if pos_lines >= len(lines):

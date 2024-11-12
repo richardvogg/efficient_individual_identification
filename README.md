@@ -4,7 +4,7 @@ Model training:
 
 Apply networks:
   - apply_presorting_module.py
-  - apply_both_modules.py                           
+  - apply_both_modules.py (ID & presorting)                      
 
 Other:
   - plotting.py                                   

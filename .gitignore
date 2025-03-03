@@ -1,2 +1,5 @@
 other/*
 *.pth
+/videos
+/annotation_images
+*.DS_Store

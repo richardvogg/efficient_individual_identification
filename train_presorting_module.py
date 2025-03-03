@@ -28,17 +28,18 @@ class simple_dataset(Dataset):
     def __getitem__(self, idx):
         normalize = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         img = self.X[idx].copy()
-        img = cv2.resize(img,(224,224))   
+        img = cv2.resize(img,(224,224), cv2.INTER_AREA)   
 
         transforms = v2.Compose([
-            v2.RandomResizedCrop(size=(224,224), scale=(0.8,1)),
+            #v2.RandomResizedCrop(size=(224,224), scale=(0.8,1)),
             v2.RandomHorizontalFlip(p=0.5),
             v2.RandomVerticalFlip(p=0.5),
-            v2.RandomRotation(degrees=45),
+            #v2.RandomRotation(degrees=45),
         ])
 
-        img = torch.tensor(img)
-        img = torch.permute(img, (2, 0, 1)).float()/255.0
+        img = torch.from_numpy(img).float()
+        img = img.permute(2, 0, 1)
+        img = img / 255.0
         
         if self.train:
             img = transforms(img)

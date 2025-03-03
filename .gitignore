@@ -2,4 +2,5 @@ other/*
 *.pth
 /videos
 /annotation_images
+/models
 *.DS_Store

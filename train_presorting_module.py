@@ -11,7 +11,7 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
-from torchvision.models import get_model 
+from torchvision.models import get_model
 from torchvision.transforms import v2
 
 class simple_dataset(Dataset):
@@ -130,6 +130,7 @@ def train(dataloader, optimizer, model, loss_fn, device):
         loss.backward()
         optimizer.step()
     
+    print("train loss: ",sum(losses) / len(losses), ", train acc:  ",sum(acc) / len(acc))
     return sum(losses) / len(losses), sum(acc) / len(acc)
 
 def validate(dataloader, model, loss_fn, device):
@@ -143,8 +144,7 @@ def validate(dataloader, model, loss_fn, device):
             pred = model(X).squeeze()
             losses.append( loss_fn(pred, y).item() )
             acc.append(accuracy(y, pred))
-    print("Loss: ",sum(losses) / len(losses))
-    print("Acc:  ",sum(acc) / len(acc))
+    print("val loss: ",sum(losses) / len(losses), ", val acc:  ",sum(acc) / len(acc))
     return sum(losses) / len(losses), sum(acc) / len(acc)
 
 def run_training(model, optimizer, loss_function, device, num_epochs, train_dataloader, val_dataloader, early_stopping):
@@ -203,13 +203,15 @@ def testing(dataloader, model, device):
 
     return mse, msa, acc.item(), conv, (preds[0],ys[0])
 
-device = "cpu"
+device = "cuda"
 
 # number of classes
 classes = 2
 
 # path where the model is written to 
-model_path = "random.pth"
+if not os.path.exists("models"):
+    os.makedirs("models")
+model_path = "models/binary.pth"
 model = create_model(str(18),classes)
 model.to(device)
 
@@ -220,8 +222,8 @@ batch_size = 128
 loss_function = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-data_path = "other/hand_labeled_IDs/"
-with open(data_path+"labels", 'r') as f:
+data_path = "annotation_images/"
+with open(os.path.join(data_path, "labels.txt"), 'r') as f:
     lines = f.readlines()
 
 early_stopping = EarlyStopping(model_path, patience=10, verbose=False, delta=0)
@@ -232,15 +234,15 @@ X = []
 # IDs -> binary labels
 for x in lines:
     x = x.replace(" ","").replace("\n","").split(",")
-    im = cv2.imread(data_path+"images/"+x[0])
+    im = cv2.imread(os.path.join(data_path, "images/", x[0]))
     X.append(im)
     if int(x[3]) == 0:
         y.append([1,0])
     else:
         y.append([0,1])
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, test_size=0.5, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=41)
+X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, test_size=0.5, random_state=41)
 
 print("done")
 train_loader = DataLoader(simple_dataset(X_train, y_train, True), batch_size=batch_size, shuffle=True)
@@ -250,8 +252,8 @@ val_loader = DataLoader(simple_dataset(X_val, y_val, False), batch_size=batch_si
 train_losses, val_losses, train_accs, val_accs = run_training(model, optimizer, loss_function, device, epochs, train_loader, val_loader, early_stopping)
 
 print("------------------------------------------")
-print(train_losses)
-print(val_losses)
+#print(train_losses)
+#print(val_losses)
 
 model.load_state_dict(torch.load(model_path))
 model.eval()

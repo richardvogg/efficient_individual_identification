@@ -53,7 +53,7 @@ fig, axs = plt.subplots(1, 1)
 confusion_matrix = np.array([[ 2,  0.,   0.,   2,   0.,   0., 0 ], [ 0.,   16, 0.,   0.,   0., 0., 0  ], [ 0., 0.,   17, 5, 0.,   0., 0  ], [ 0.,   0.,   0.,   19, 0.,   0., 0  ], [ 1,   0., 0.,   1,   6, 0., 1], [ 0.,   0.,   0., 0., 0.,   22, 0  ], [ 0, 0, 0, 0, 0, 0, 0 ]])
 
 axs = sns.heatmap(confusion_matrix, annot=True)
-axs.set_xlabel("Predicitons", fontsize=13)
+axs.set_xlabel("Predictions", fontsize=13)
 axs.set_ylabel('Label', fontsize=13)
 axs.set_xticklabels(["1", "2", "3", "4", "5", "6", "unsure"])
 axs.set_yticklabels(["1", "2", "3", "4", "5", "6", "unsure"])

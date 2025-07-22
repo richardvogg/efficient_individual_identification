@@ -31,10 +31,12 @@ class simple_dataset(Dataset):
         img = cv2.resize(img,(224,224), cv2.INTER_AREA)   
 
         transforms = v2.Compose([
-            #v2.RandomResizedCrop(size=(224,224), scale=(0.8,1)),
-            v2.RandomHorizontalFlip(p=0.5),
+            #v2.RandomResizedCrop(size=(224,224), scale=(0.9,1)),
+            #v2.RandomHorizontalFlip(p=0.5),
             v2.RandomVerticalFlip(p=0.5),
-            #v2.RandomRotation(degrees=45),
+            v2.RandomAffine(degrees=5, translate=(0.05,0.05), scale=(0.95,1.05)),
+            v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+            #v2.RandomRotation(degrees=10),
         ])
 
         img = torch.from_numpy(img).float()
@@ -53,31 +55,31 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.inf
+        self.val_acc_max = 0 #np.inf
         self.delta = delta
         self.model_checkpoint_path = checkpoint_path
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_acc, model):
 
-        score = -val_loss
+        score = val_acc
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
-        elif score < self.best_score + self.delta:
+            self.save_checkpoint(val_acc, model)
+        elif score < (self.best_score + self.delta):
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_acc, model)
             self.counter = 0
     
-    def save_checkpoint(self, val_loss, model):
+    def save_checkpoint(self, val_acc, model):
         if self.verbose:
-            print(f'Validation Loss Decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
+            print(f'Validation Loss Decreased ({self.val_acc_max:.6f} --> {val_acc:.6f}).  Saving model ...')
         torch.save(model.state_dict(), self.model_checkpoint_path)
-        self.val_loss_min = val_loss
+        self.val_acc_max = val_acc
 
 def load_txt(fn):
     with open(fn,"r") as f:
@@ -130,7 +132,7 @@ def train(dataloader, optimizer, model, loss_fn, device):
         loss.backward()
         optimizer.step()
     
-    print("train loss: ",sum(losses) / len(losses), ", train acc:  ",sum(acc) / len(acc))
+    print("train loss: ",sum(losses) / len(losses), ", train acc:  ", (sum(acc) / len(acc)).item())
     return sum(losses) / len(losses), sum(acc) / len(acc)
 
 def validate(dataloader, model, loss_fn, device):
@@ -144,7 +146,7 @@ def validate(dataloader, model, loss_fn, device):
             pred = model(X).squeeze()
             losses.append( loss_fn(pred, y).item() )
             acc.append(accuracy(y, pred))
-    print("val loss: ",sum(losses) / len(losses), ", val acc:  ",sum(acc) / len(acc))
+    print("val loss: ", sum(losses) / len(losses), ", val acc:  ", (sum(acc) / len(acc)).item())
     return sum(losses) / len(losses), sum(acc) / len(acc)
 
 def run_training(model, optimizer, loss_function, device, num_epochs, train_dataloader, val_dataloader, early_stopping):
@@ -161,7 +163,7 @@ def run_training(model, optimizer, loss_function, device, num_epochs, train_data
         
         val_loss, val_acc = validate( val_dataloader, model, loss_function, device )
         
-        early_stopping(val_loss, model)
+        early_stopping(val_acc, model)
 
         if early_stopping.early_stop:
             print("Early Stopp !!!")
@@ -221,12 +223,13 @@ batch_size = 128
 
 loss_function = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.2)
 
 data_path = "annotation_images/"
 with open(os.path.join(data_path, "labels.txt"), 'r') as f:
     lines = f.readlines()
 
-early_stopping = EarlyStopping(model_path, patience=10, verbose=False, delta=0)
+early_stopping = EarlyStopping(model_path, patience=30, verbose=False, delta=0)
 model.to(device)
 
 y = []
@@ -252,8 +255,13 @@ val_loader = DataLoader(simple_dataset(X_val, y_val, False), batch_size=batch_si
 train_losses, val_losses, train_accs, val_accs = run_training(model, optimizer, loss_function, device, epochs, train_loader, val_loader, early_stopping)
 
 print("------------------------------------------")
-#print(train_losses)
-#print(val_losses)
+with open("training_results.txt", "w") as f:
+    for epoch in range(len(train_losses)):
+        f.write(f"Epoch {epoch+1}: ")
+        f.write(f"Train Loss: {train_losses[epoch]:.4f}, ")
+        f.write(f"Train Accuracy: {train_accs[epoch].item():.4f}, ")
+        f.write(f"Val Loss: {val_losses[epoch]:.4f}, ")
+        f.write(f"Val Accuracy: {val_accs[epoch].item():.4f}\n")
 
 model.load_state_dict(torch.load(model_path))
 model.eval()

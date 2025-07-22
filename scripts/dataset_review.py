@@ -32,7 +32,7 @@ def read_and_summarize_labels(file_path):
                     ax.imshow(image)
                     ax.axis('off')
                 plt.tight_layout()
-                plt.savefig(f'sample2_class_{class_label}.png')
+                plt.savefig(f'assets/sample2_class_{class_label}.png')
                 plt.close()
 
             plot_images(sample_class_0, 0)

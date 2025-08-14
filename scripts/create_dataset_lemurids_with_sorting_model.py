@@ -170,13 +170,16 @@ def sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, 
     # If there are fewer than top_n valid scores, take all of them
     if len(valid_indices) <= top_n:
         top_n_sorted_sampled_indices = sorted_sampled_indices[valid_indices]
+        top_n_scores = scores_array[valid_indices]
     else:
         # Otherwise, take the top_n highest scores among the valid ones
         valid_scores = scores_array[valid_indices]
         top_indices_within_valid = np.argsort(valid_scores)[-top_n:]
         top_n_sorted_sampled_indices = sorted_sampled_indices[valid_indices[top_indices_within_valid]]
+        top_n_scores = valid_scores[top_indices_within_valid]
 
-    subset_df = combined_df.loc[top_n_sorted_sampled_indices]
+    subset_df = combined_df.loc[top_n_sorted_sampled_indices].copy()
+    subset_df.loc[:, 'score'] = top_n_scores
 
     return subset_df
 
@@ -204,7 +207,7 @@ def extract_images(label_root, group, path_to_videos, final_df, experiment_name=
         width = int(row['width'])
         height = int(row['height'])
 
-        filename = experiment_name + "_" + group
+        filename = experiment_name + "_" + group + ".txt"
         
         file_path = os.path.join(group_folder, filename)
 
@@ -226,7 +229,7 @@ def extract_images(label_root, group, path_to_videos, final_df, experiment_name=
                 image_path = os.path.join(images_folder, image_filename)
                 cv2.imwrite(image_path, frame)
                 with open(file_path, 'a') as f:
-                    f.write(f"{row['experiment']}_{row['trackNumber']}.png,{xCoord},{yCoord},{width},{height},{row['nameOrder']}\n")
+                    f.write(f"{row['experiment']}_{row['trackNumber']}.png,{xCoord},{yCoord},{width},{height},{row['nameOrder']},{row['score']}\n")
                 #print(f"Frame {frame_number} saved as {image_path}")
             else:
                 print(f"Error: Could not read frame {frame_number}")
@@ -238,7 +241,7 @@ files_in_label_root = os.listdir(label_root)
 experiment_name = "cluster_1000_5000"
 n_cluster = 5000
 
-for group in ['R1', 'J', 'B', 'Alpha']:
+for group in ['Alpha']:
 
     path_to_videos = f"/usr/users/vogg/sfb1528s3/B06/2023april-july/NewBoxesClosed/Converted/{group}/"
     #data_root = Path(f"/usr/users/vogg/Labelling/Lemurs/labelling_app_indID/richard_sorted/{group}")
@@ -251,8 +254,11 @@ for group in ['R1', 'J', 'B', 'Alpha']:
 
     all_subsets = []
 
-    for ind_id in [i for i in orderedNames if i not in ([unsure_index] + list(under_n_index))]:
+    for ind_id in [i for i in range(len(orderedNames)) if i not in ([unsure_index] + list(under_n_index))]:
         print(ind_id)
+        if len(combined_df[combined_df['nameOrder'] == ind_id]) == 0:
+            print(f"No data for individual ID {ind_id}, skipping...")
+            continue
         sorted_sampled_indices = cluster_indices(combined_df, ind_id, n_cluster=n_cluster)
         subset_df = sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000)
         all_subsets.append(subset_df)
@@ -264,6 +270,9 @@ for group in ['R1', 'J', 'B', 'Alpha']:
         
         for nameOrder in under_n_index:
             nameOrder_df = combined_df[combined_df['nameOrder'] == nameOrder]
+            if len(nameOrder_df) == 0:
+                print(f"No data for nameOrder {nameOrder}, skipping...")
+                continue
             sorted_sampled_indices = nameOrder_df.index.values
             subset_df = sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000)
             under_n_samples.append(subset_df)
@@ -272,6 +281,7 @@ for group in ['R1', 'J', 'B', 'Alpha']:
 
     unsure_df = combined_df[combined_df['nameOrder'] == unsure_index]
     unsure_sample = unsure_df.sample(5000, random_state=0)
+    unsure_sample.loc[:, 'score'] = 0
 
     dfs_to_concat = [final_df, unsure_sample]
     if 'under_n_df' in locals():

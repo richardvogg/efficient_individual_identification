@@ -14,7 +14,7 @@ from torch import nn
 from torchvision.models import get_model
 from torchvision.transforms import v2
 
-class simple_dataset(Dataset):
+class SimpleDataset(Dataset):
     def __init__(self, X, y, train):
         self.X = X.copy()
         self.y = y.copy()
@@ -248,9 +248,9 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_
 X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, test_size=0.5, random_state=41)
 
 print("done")
-train_loader = DataLoader(simple_dataset(X_train, y_train, True), batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(simple_dataset(X_test, y_test, False), batch_size=batch_size, shuffle=True) 
-val_loader = DataLoader(simple_dataset(X_val, y_val, False), batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(SimpleDataset(X_train, y_train, True), batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(SimpleDataset(X_test, y_test, False), batch_size=batch_size, shuffle=True) 
+val_loader = DataLoader(SimpleDataset(X_val, y_val, False), batch_size=batch_size, shuffle=True)
 
 train_losses, val_losses, train_accs, val_accs = run_training(model, optimizer, loss_function, device, epochs, train_loader, val_loader, early_stopping)
 

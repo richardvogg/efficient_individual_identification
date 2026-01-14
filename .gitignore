@@ -3,4 +3,9 @@ other/*
 /videos
 /annotation_images
 /models
+/data
+/output
 *.DS_Store
+assets/cluster_1000_5000/*
+assets/limit10_1000_5000/*
+*.csv

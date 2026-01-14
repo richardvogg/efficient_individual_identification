@@ -11,6 +11,7 @@ import torchvision.models as models
 import torch.nn as nn
 import cv2
 import re
+import time
 
 
 
@@ -62,17 +63,41 @@ def load_data(label_root, group):
     return combined_df, orderedNames
 
 
-def get_dataset_statistics(combined_df, orderedNames):
+def get_dataset_statistics(combined_df, orderedNames, filename = 'logfile.txt'):
     print("Dataset Statistics:")
     print(f"Total number of detections: {len(combined_df)}")
     print(f"Unique track IDs: {combined_df[['experiment', 'trackId']].nunique()}")
     print(f"Unique individuals: {combined_df['nameOrder'].nunique()}")
-    
-    # Count the occurrences of each name order
+
     name_order_counts = combined_df['nameOrder'].value_counts()
-    print("Name Order Counts:")
-    for name, count in name_order_counts.items():
-        print(f"{orderedNames[name]} ({name}): {count}")
+    #name_order_counts.index = name_order_counts.index.map(lambda x: f"{orderedNames[x]} ({x})")
+    distinct_counts = combined_df[['nameOrder', 'experiment', 'trackId']].drop_duplicates().groupby('nameOrder').size()
+    distinct_experiments = combined_df[['nameOrder', 'experiment']].drop_duplicates().groupby(['nameOrder']).size()
+    distinct_experiment_trackid = combined_df[['nameOrder', 'experiment', 'trackId']].drop_duplicates().groupby('nameOrder').size()
+
+    distinct_counts = distinct_counts.sort_index()
+    distinct_experiments = distinct_experiments.sort_index()
+    distinct_experiment_trackid = distinct_experiment_trackid.sort_index()
+    name_order_counts = name_order_counts.sort_index()
+
+    summary_df = pd.DataFrame({
+        'nameOrder': distinct_counts.index,
+        'name': [orderedNames[i] for i in distinct_counts.index],
+        'total_tracks': distinct_experiment_trackid.values,
+        'total_frames': name_order_counts.values,
+        'total_experiments': distinct_experiments.values
+    })
+    # Print the summary_df as a markdown table for easy copying
+    print(summary_df.to_markdown(index=False))
+
+
+    with open(filename, "a") as f:
+        f.write("Dataset Statistics:\n")
+        f.write(f"Total number of detections: {len(combined_df)}\n")
+        f.write(f"Unique track IDs: {combined_df[['experiment', 'trackId']].nunique()}\n")
+        f.write(f"Unique individuals: {combined_df['nameOrder'].nunique()}\n\n")
+        f.write(summary_df.to_markdown(index=False))
+        f.write("\n")
 
     return name_order_counts
 
@@ -110,8 +135,32 @@ def cluster_indices(combined_df, ind_id, n_cluster=10000):
     sorted_sampled_indices = sampled_indices.sort_values()
     return sorted_sampled_indices
 
+def trim_tracks(combined_df, n=10):
+    # For each trackID in each experiment, remove the first and the last n trackNumbers
+    cleaned_combined_df = pd.DataFrame(columns=combined_df.columns)
+    for (experiment, trackId), grp in combined_df.groupby(['experiment', 'trackId']):
+        if len(grp) > (2 * n):
+            cleaned_group = grp.iloc[n:-n]
+        else:
+            cleaned_group = grp
+        cleaned_combined_df = pd.concat([cleaned_combined_df, cleaned_group], ignore_index=True)
+    return cleaned_combined_df
 
-def sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, min_score=0.5):
+
+def indices_from_tracks(combined_df, ind_id, n_per_individual=5000):
+
+    ind_df = combined_df[combined_df['nameOrder'] == ind_id]
+    total_tracks = ind_df[['experiment', 'trackId']].drop_duplicates().shape[0]
+    total_frames = len(ind_df)
+    k = min(n_per_individual // total_tracks, total_frames // total_tracks)
+    print(f"Individual {ind_id} ({orderedNames[ind_id]}): total_tracks={total_tracks}, total_frames={total_frames}, k={k}")
+    if k > 0:
+        sampled_ind_df = ind_df.groupby(['experiment', 'trackId']).apply(lambda x: x.sample(n=k, random_state=0) if len(x) >= k else x)
+        sampled_ind_df.index = sampled_ind_df.index.get_level_values(2)
+
+    return sampled_ind_df.index.sort_values()
+
+def sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, min_score=0.5, max_from_one_track=None):
     # Retrieve sorting model scores from video data
     path_to_videos = f"/usr/users/vogg/sfb1528s3/B06/2023april-july/NewBoxesClosed/Converted/{group}/"
 
@@ -129,7 +178,11 @@ def sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, 
         cap = cv2.VideoCapture(video_path)
 
         if not cap.isOpened():
-            print(f"Error: Could not open video {video_path}")
+            time.sleep(1)
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                print(f"Error: Could not open video {video_path}")
+                continue
         else: 
             frame_number = int(row['trackNumber'])
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
@@ -180,6 +233,13 @@ def sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, 
 
     subset_df = combined_df.loc[top_n_sorted_sampled_indices].copy()
     subset_df.loc[:, 'score'] = top_n_scores
+
+    if max_from_one_track is not None and max_from_one_track > 0:
+        # select the top 1000 scores with the restriction that not more than 10 per experiment and trackId
+        subset_df = subset_df.sort_values(by='score', ascending=False)
+        subset_df = subset_df.groupby(['experiment', 'trackId']).head(max_from_one_track)
+        if len(subset_df) > 1000:    
+            subset_df = subset_df.head(1000)
 
     return subset_df
 
@@ -238,18 +298,24 @@ def extract_images(label_root, group, path_to_videos, final_df, experiment_name=
 label_root = "../Labelling/Lemurs/labelling_app_indID/raw_labels/"
 files_in_label_root = os.listdir(label_root)
 
-experiment_name = "cluster_1000_5000"
-n_cluster = 5000
 
-for group in ['Alpha']:
+
+experiment_name = "limit10_1000_5000"
+logfile = f"experiments/{experiment_name}_logfile.txt"
+n_per_individual = 5000
+
+for group in ['Alpha', 'B', 'J', 'R1']:
 
     path_to_videos = f"/usr/users/vogg/sfb1528s3/B06/2023april-july/NewBoxesClosed/Converted/{group}/"
     #data_root = Path(f"/usr/users/vogg/Labelling/Lemurs/labelling_app_indID/richard_sorted/{group}")
     combined_df, orderedNames = load_data(label_root, group)
-    name_order_counts = get_dataset_statistics(combined_df, orderedNames)
+    combined_df = trim_tracks(combined_df, n = 10)
+    with open(logfile, "a") as f:
+        f.write(f"\nGroup: {group}\n")
+    name_order_counts = get_dataset_statistics(combined_df, orderedNames, filename=logfile)
     model = load_model(pretrained=True)
     unsure_index = orderedNames.index('Unsure')
-    under_n_index = name_order_counts[name_order_counts < n_cluster].index
+    under_n_index = [] #name_order_counts[name_order_counts < n_per_individual].index
     #under_n_index = under_n_names.map(lambda x: int(re.search(r'\((\d+)\)', x).group(1)))
 
     all_subsets = []
@@ -259,8 +325,9 @@ for group in ['Alpha']:
         if len(combined_df[combined_df['nameOrder'] == ind_id]) == 0:
             print(f"No data for individual ID {ind_id}, skipping...")
             continue
-        sorted_sampled_indices = cluster_indices(combined_df, ind_id, n_cluster=n_cluster)
-        subset_df = sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000)
+        #sorted_sampled_indices = cluster_indices(combined_df, ind_id, n_cluster=n_per_individual)
+        sorted_sampled_indices = indices_from_tracks(combined_df, ind_id, n_per_individual=n_per_individual)
+        subset_df = sample_top_n_scores(combined_df, sorted_sampled_indices, model, top_n=1000, max_from_one_track=10) # max_from_one_track was None
         all_subsets.append(subset_df)
 
     final_df = pd.concat(all_subsets, ignore_index=True)
@@ -291,6 +358,6 @@ for group in ['Alpha']:
     # Reorder sampled_df by the columns experiment and trackNumber
     final_df = final_df.sort_values(by=['experiment', 'trackNumber']).reset_index(drop=True)
 
-    name_order_counts_after = get_dataset_statistics(final_df, orderedNames)
+    name_order_counts_after = get_dataset_statistics(final_df, orderedNames, filename=logfile)
     extract_images(label_root, group, path_to_videos, final_df, experiment_name=experiment_name)
 

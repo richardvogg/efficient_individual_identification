@@ -20,24 +20,26 @@ from PIL import Image
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from sklearn.metrics import balanced_accuracy_score
 
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_path', type=str, default="/usr/users/vogg/Labelling/Lemurs/labelling_app_indID/experiments/")
 parser.add_argument('--output_path', type=str, default="models/id/")
-parser.add_argument('--experiment', type=str, default="cluster_1000_5000")
-parser.add_argument('--group', type=str, default="R1")
-parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--experiment_data', type=str, default="limit10_1000_5000")
+parser.add_argument('--experiment_name', type=str, default="limit10_1000_1000")
+parser.add_argument('--group', type=str, default="Alpha")
+parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_epochs', type=int, default=100)
 parser.add_argument('--gpus', type=int, nargs='+', default=[0])
-parser.add_argument('--lr', type=float, default=0.0001)
+parser.add_argument('--lr', type=float, default=0.00001)
 parser.add_argument('--patience', type=int, default=10)
 args = parser.parse_args()
 
 
 class IDDataset(Dataset):
-    def __init__(self, root_path, txt_filename='cluster_1000_5000_R1.txt', train=True, transform=None, test_size=0.2, unknown_prop = 1, random_state=64):
+    def __init__(self, root_path, txt_filename='cluster_1000_5000_R1.txt', train=True, transform=None, test_size=0.2, unknown_prop = 0.2, random_state=64):
         self.root_path = root_path
         self.image_dir = os.path.join(root_path, "images")
         self.txt_path = os.path.join(root_path, txt_filename)
@@ -55,6 +57,8 @@ class IDDataset(Dataset):
             max_id_rows = df[df["id"] == max_id]
             sampled_max_id_rows = max_id_rows.sample(frac=unknown_prop, random_state=random_state)
             df = pd.concat([df[df["id"] != max_id], sampled_max_id_rows]).reset_index(drop=True)
+        elif unknown_prop == 0:
+            df = df[df["id"] != df["id"].max()].reset_index(drop=True)
 
         # Split by experiment
         experiments = df["experiment"].unique()
@@ -123,17 +127,21 @@ def main(args):
 
     print('Setting up data...')
 
-    data_path = os.path.join(args.data_path, args.experiment, args.group)
+    data_path = os.path.join(args.data_path, args.experiment_data, args.group)
 
-    transform = T.Compose([
+    transform_train = T.Compose([
         T.RandomHorizontalFlip(p=0.5),
         T.RandomRotation(degrees=15),
         T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    dset_train = IDDataset(data_path, args.experiment + "_" + args.group + ".txt", train=True, transform=transform, test_size=0.2, unknown_prop=1, random_state=64)
-    dset_val = IDDataset(data_path, args.experiment + "_" + args.group + ".txt", train=False, transform=transform, test_size=0.2, unknown_prop=1, random_state=64)
+    transform_val = T.Compose([
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    dset_train = IDDataset(data_path, args.experiment_data + "_" + args.group + ".txt", train=True, transform=transform_train, test_size=0.15, unknown_prop=0.2, random_state=63)
+    dset_val = IDDataset(data_path, args.experiment_data + "_" + args.group + ".txt", train=False, transform=transform_val, test_size=0.15, unknown_prop=0, random_state=63)
     print("datasets loaded")
     
     train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, prefetch_factor=4)
@@ -141,10 +149,10 @@ def main(args):
 
     print('Creating model...')
 
-    progress_file_path = os.path.join(args.output_path, args.group, args.experiment, "training_progress.txt")
+    progress_file_path = os.path.join(args.output_path, args.group, args.experiment_name, "training_progress.txt")
     os.makedirs(os.path.dirname(progress_file_path), exist_ok=True)
 
-    num_classes = max(dset_train.df['id']) + 1
+    num_classes = 13 #max(dset_train.df['id']) + 1
 
     model = torchvision.models.resnet18(pretrained=True)
     num_ftrs = model.fc.in_features
@@ -185,10 +193,14 @@ def main(args):
         val_running_loss = 0.0
         val_correct = 0
         val_total = 0
-
-        # Use tqdm for progress bar in validation
-        with torch.no_grad():  # No need to compute gradients during validation
+        all_val_labels = []
+        all_val_preds = []
+        with torch.no_grad():  
             for val_inputs, val_labels in tqdm(val_loader, desc="Validation", leave=False):
+                max_label = max(dset_val.df['id'])
+                mask = val_labels < max_label
+                val_inputs = val_inputs[mask]
+                val_labels = val_labels[mask]
                 val_inputs, val_labels = val_inputs.to(device), val_labels.to(device)
                 val_outputs = model(val_inputs)
                 val_loss = criterion(val_outputs, val_labels)
@@ -199,7 +211,10 @@ def main(args):
                 val_total += val_labels.size(0)
                 val_correct += val_predicted.eq(val_labels).sum().item()
 
-        
+                # Collect for balanced accuracy
+                all_val_labels.extend(val_labels.cpu().numpy())
+                all_val_preds.extend(val_predicted.cpu().numpy())
+
         # Print statistics for the current epoch
         epoch_loss = running_loss / total
         epoch_accuracy = 100. * correct / total
@@ -208,7 +223,15 @@ def main(args):
         val_epoch_loss = val_running_loss / val_total
         val_epoch_accuracy = 100. * val_correct / val_total
 
-        progress = f'Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}, Accuracy: {epoch_accuracy:.2f}%, Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_accuracy:.2f}%'
+        # Compute balanced accuracy for validation set
+        if len(all_val_labels) > 0:
+            val_balanced_accuracy = 100. * balanced_accuracy_score(all_val_labels, all_val_preds)
+        else:
+            val_balanced_accuracy = 0.0
+        print(f"Validation Balanced Accuracy: {val_balanced_accuracy:.2f}%")
+        
+
+        progress = f'Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}, Accuracy: {epoch_accuracy:.2f}%, Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_accuracy:.2f}%, Validation Balanced Accuracy: {val_balanced_accuracy:.2f}%'
         print(progress)
         with open(progress_file_path, "a") as progress_file:
             progress_file.write(progress + '\n')
@@ -226,10 +249,10 @@ def main(args):
             new_model_state_dict[new_key] = value
 
         # Save the new state dictionary to the checkpoint
-        torch.save(new_model_state_dict, f'{args.output_path}/{args.group}/{args.experiment}/model_checkpoint_{epoch+1}.pth')
+        torch.save(new_model_state_dict, f'{args.output_path}/{args.group}/{args.experiment_name}/model_checkpoint_{epoch+1}.pth')
 
-        if val_epoch_accuracy > best_val_accuracy:
-            best_val_accuracy = val_epoch_accuracy
+        if val_balanced_accuracy > best_val_accuracy:
+            best_val_accuracy = val_balanced_accuracy
             counter = 0
         else:
             counter += 1
